@@ -1,0 +1,17 @@
+[build]
+  publish = "web/dist"
+  command = "npm --prefix web ci && npm --prefix web run build"
+
+[functions]
+  directory = "web/netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/triage"
+  to = "/.netlify/functions/triage"
+  status = 200
+
+[[redirects]]
+  from = "/api/places"
+  to = "/.netlify/functions/places"
+  status = 200

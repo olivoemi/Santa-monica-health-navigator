@@ -432,7 +432,7 @@ app.get('/api/places', async (req, res) => {
     const { zip, keyword } = req.query;
     // Use Google Places Text Search or Nearby Search. Example using Text Search:
     const q = encodeURIComponent((keyword ? keyword + ' ' : '') + 'medical Santa Monica ' + (zip || ''));
-    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${q}&key=${process.env.GOOGLE_API_KEY}`;
+    const url = \`https://maps.googleapis.com/maps/api/place/textsearch/json?query=${'${'}q${'}'}&key=${'${'}process.env.GOOGLE_API_KEY${'}'}\`;
     const r = await fetch(url);
     const data = await r.json();
     // map to provider shape
