@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 
 // Hoisted constants and helpers for better performance (avoid re-allocating on each render)
 const STATIC_PROVIDERS = [
@@ -136,12 +136,13 @@ function staticPlacesFallback({ keyword, type }) {
   return filtered;
 }
 
-async function callTriageBackend(payload) {
+async function callTriageBackend(payload, signal) {
   try {
     const res = await fetch('/api/triage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal
     });
     if (!res.ok) {
       return localTriageFallback(payload);
@@ -154,10 +155,10 @@ async function callTriageBackend(payload) {
   }
 }
 
-async function callPlacesBackend({ zip, keyword, type }) {
+async function callPlacesBackend({ zip, keyword, type }, signal) {
   try {
     const params = new URLSearchParams({ zip, keyword: keyword || '', type: type || '' });
-    const res = await fetch('/api/places?' + params.toString());
+    const res = await fetch('/api/places?' + params.toString(), { signal });
     if (!res.ok) {
       return staticPlacesFallback({ zip, keyword, type });
     }
@@ -190,6 +191,7 @@ export default function HealthNavigatorPrototype() {
   const [sex, setSex] = useState("unknown");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const pendingControllerRef = useRef(null);
 
   // Helper: reset selection
   const onRegionClick = useCallback((id) => {
@@ -212,10 +214,17 @@ export default function HealthNavigatorPrototype() {
     setResult(null);
     setLoading(true);
 
+    // abort previous in-flight requests
+    if (pendingControllerRef.current) {
+      try { pendingControllerRef.current.abort(); } catch {}
+    }
+    const controller = new AbortController();
+    pendingControllerRef.current = controller;
+
     const payload = { selectedRegion, symptoms, severity, duration, age, sex, insurance, zip };
 
     // 1) Triage
-    const triage = await callTriageBackend(payload);
+    const triage = await callTriageBackend(payload, controller.signal);
 
     // Map triage to a provider type for Places search
     let targetType = 'Primary Care';
@@ -224,7 +233,7 @@ export default function HealthNavigatorPrototype() {
     else if (triage.level === 'specialty') targetType = 'Specialty';
 
     // 2) Search for places via backend
-    const providers = await callPlacesBackend({ zip, keyword: targetType });
+    const providers = await callPlacesBackend({ zip, keyword: targetType }, controller.signal);
 
     // 3) Filter by insurance if provided
     let final = providers;
