@@ -1,4 +1,173 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useCallback, useMemo } from "react";
+
+// Hoisted constants and helpers for better performance (avoid re-allocating on each render)
+const STATIC_PROVIDERS = [
+  {
+    id: "ucla_er",
+    name: "UCLA Santa Monica Medical Center",
+    type: "ER",
+    address: "1250 16th St, Santa Monica, CA",
+    lat: 34.0194,
+    lng: -118.4896,
+    phone: "+1-310-319-xxx",
+    acceptedInsurances: ["Medicare", "Aetna", "Blue Cross"]
+  },
+  {
+    id: "sm_primary_ocean",
+    name: "Santa Monica Primary Care - Ocean Ave",
+    type: "Primary Care",
+    address: "200 Ocean Ave, Santa Monica, CA",
+    lat: 34.0115,
+    lng: -118.4921,
+    phone: "+1-310-555-1212",
+    acceptedInsurances: ["Aetna", "Blue Cross", "UHC"]
+  },
+  {
+    id: "sm_urgent",
+    name: "Santa Monica Urgent Care",
+    type: "Urgent Care",
+    address: "1800 Wilshire Blvd, Santa Monica, CA",
+    lat: 34.0396,
+    lng: -118.4413,
+    phone: "+1-310-555-9876",
+    acceptedInsurances: ["Aetna", "UHC"]
+  },
+  {
+    id: "ortho_sm",
+    name: "Orthopedics of Santa Monica",
+    type: "Specialty",
+    specialty: "Orthopedics",
+    address: "930 Broadway, Santa Monica, CA",
+    lat: 34.0312,
+    lng: -118.4466,
+    phone: "+1-310-555-3333",
+    acceptedInsurances: ["Blue Cross", "UHC"]
+  }
+];
+
+const REGIONS = [
+  { id: "head", label: "Head / Face" },
+  { id: "neck", label: "Neck" },
+  { id: "chest", label: "Chest" },
+  { id: "abdomen", label: "Abdomen" },
+  { id: "pelvis", label: "Pelvis / Groin" },
+  { id: "leftShoulder", label: "Left Shoulder" },
+  { id: "rightShoulder", label: "Right Shoulder" },
+  { id: "leftArm", label: "Left Arm" },
+  { id: "rightArm", label: "Right Arm" },
+  { id: "leftHand", label: "Left Hand / Wrist" },
+  { id: "rightHand", label: "Right Hand / Wrist" },
+  { id: "leftLeg", label: "Left Leg" },
+  { id: "rightLeg", label: "Right Leg" },
+  { id: "leftFoot", label: "Left Foot / Ankle" },
+  { id: "rightFoot", label: "Right Foot / Ankle" },
+  { id: "back", label: "Back" }
+];
+
+const COMMON_SYMPTOMS = {
+  head: ["Headache", "Dizziness", "Facial swelling", "Vision changes", "Loss of consciousness"],
+  neck: ["Stiff neck", "Neck pain", "Swelling"],
+  chest: ["Chest pain", "Shortness of breath", "Palpitations", "Coughing blood"],
+  abdomen: ["Abdominal pain", "Nausea", "Vomiting", "Severe abdominal pain"],
+  pelvis: ["Pelvic pain", "Urinary pain", "Groin swelling"],
+  leftShoulder: ["Pain", "Limited range of motion", "Swelling"],
+  rightShoulder: ["Pain", "Limited range of motion", "Swelling"],
+  leftArm: ["Pain", "Numbness", "Weakness"],
+  rightArm: ["Pain", "Numbness", "Weakness"],
+  leftHand: ["Wrist pain", "Numb fingers", "Swelling"],
+  rightHand: ["Wrist pain", "Numb fingers", "Swelling"],
+  leftLeg: ["Pain", "Swelling", "Difficulty walking", "Redness"],
+  rightLeg: ["Pain", "Swelling", "Difficulty walking", "Redness"],
+  leftFoot: ["Ankle pain", "Difficulty bearing weight", "Swelling"],
+  rightFoot: ["Ankle pain", "Difficulty bearing weight", "Swelling"],
+  back: ["Lower back pain", "Upper back pain", "Radiating leg pain"]
+};
+
+const REGION_ID_TO_LABEL = Object.fromEntries(REGIONS.map(r => [r.id, r.label]));
+
+function mapsDirectionsUrl({ address, lat, lng }) {
+  if (lat && lng) return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(lat + ',' + lng)}`;
+  if (address) return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+  return 'https://www.google.com/maps';
+}
+
+// Memoized SVG component to avoid re-creating the SVG tree on unrelated state changes
+const AnatomicalSVG = React.memo(function AnatomicalSVG({ selectedRegion, onRegionClick }) {
+  return (
+    <svg viewBox="0 0 300 700" className="w-full h-auto" role="img" aria-label="Anatomical body selector">
+      <ellipse cx="150" cy="70" rx="45" ry="55" fill={selectedRegion === 'head' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('head')} style={{cursor: 'pointer'}} />
+      <rect x="135" y="125" width="30" height="20" rx="8" fill={selectedRegion === 'neck' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('neck')} style={{cursor: 'pointer'}} />
+      <ellipse cx="95" cy="160" rx="35" ry="18" fill={selectedRegion === 'leftShoulder' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftShoulder')} style={{cursor: 'pointer'}} />
+      <ellipse cx="205" cy="160" rx="35" ry="18" fill={selectedRegion === 'rightShoulder' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightShoulder')} style={{cursor: 'pointer'}} />
+      <path d="M110 145 q40 -10 80 0 v80 q-40 10 -80 0 z" fill={selectedRegion === 'chest' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('chest')} style={{cursor: 'pointer'}} />
+      <rect x="120" y="235" width="60" height="70" rx="14" fill={selectedRegion === 'abdomen' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('abdomen')} style={{cursor: 'pointer'}} />
+      <rect x="115" y="310" width="70" height="50" rx="10" fill={selectedRegion === 'pelvis' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('pelvis')} style={{cursor: 'pointer'}} />
+      <rect x="50" y="175" width="40" height="150" rx="20" fill={selectedRegion === 'leftArm' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftArm')} style={{cursor: 'pointer'}} />
+      <rect x="210" y="175" width="40" height="150" rx="20" fill={selectedRegion === 'rightArm' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightArm')} style={{cursor: 'pointer'}} />
+      <rect x="35" y="325" width="28" height="40" rx="8" fill={selectedRegion === 'leftHand' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftHand')} style={{cursor: 'pointer'}} />
+      <rect x="237" y="325" width="28" height="40" rx="8" fill={selectedRegion === 'rightHand' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightHand')} style={{cursor: 'pointer'}} />
+      <rect x="90" y="375" width="120" height="60" rx="12" fill={selectedRegion === 'back' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('back')} style={{cursor: 'pointer'}} />
+      <rect x="120" y="450" width="36" height="160" rx="14" fill={selectedRegion === 'leftLeg' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftLeg')} style={{cursor: 'pointer'}} />
+      <rect x="164" y="450" width="36" height="160" rx="14" fill={selectedRegion === 'rightLeg' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightLeg')} style={{cursor: 'pointer'}} />
+      <rect x="110" y="615" width="48" height="28" rx="8" fill={selectedRegion === 'leftFoot' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftFoot')} style={{cursor: 'pointer'}} />
+      <rect x="160" y="615" width="48" height="28" rx="8" fill={selectedRegion === 'rightFoot' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightFoot')} style={{cursor: 'pointer'}} />
+    </svg>
+  );
+});
+
+// Local fallback triage logic (simple, safe)
+function localTriageFallback({ symptoms, severity, duration, age }) {
+  const redFlagRegex = /(chest pain|shortness of breath|loss of consciousness|severe abdominal pain|uncontrolled bleeding|sudden severe headache)/i;
+  if (symptoms.some(s => redFlagRegex.test(s))) {
+    return { level: 'emergency', rationale: 'Red-flag symptom detected' };
+  }
+  if (severity === 'severe') return { level: 'emergency', rationale: 'High severity reported' };
+  if (severity === 'moderate' && duration === 'hours') return { level: 'urgent', rationale: 'Moderate and recent' };
+  if (severity === 'mild' && duration === 'hours') return { level: 'urgent', rationale: 'Mild but recent' };
+  if (age >= 65 && severity !== 'mild') return { level: 'urgent', rationale: 'Older adult with concerns' };
+  return { level: 'primary', rationale: 'Routine primary care recommended' };
+}
+
+function staticPlacesFallback({ keyword, type }) {
+  const kw = (keyword || '').toLowerCase();
+  let filtered = STATIC_PROVIDERS;
+  if (type) filtered = filtered.filter(p => p.type.toLowerCase() === type.toLowerCase());
+  if (kw) filtered = filtered.filter(p => p.name.toLowerCase().includes(kw) || (p.specialty || '').toLowerCase().includes(kw) || p.type.toLowerCase().includes(kw));
+  return filtered;
+}
+
+async function callTriageBackend(payload) {
+  try {
+    const res = await fetch('/api/triage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      return localTriageFallback(payload);
+    }
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    console.warn('Triage backend failed, using local fallback', err);
+    return localTriageFallback(payload);
+  }
+}
+
+async function callPlacesBackend({ zip, keyword, type }) {
+  try {
+    const params = new URLSearchParams({ zip, keyword: keyword || '', type: type || '' });
+    const res = await fetch('/api/places?' + params.toString());
+    if (!res.ok) {
+      return staticPlacesFallback({ zip, keyword, type });
+    }
+    const data = await res.json();
+    return data.providers || [];
+  } catch (err) {
+    console.warn('Places backend failed, using static fallback', err);
+    return staticPlacesFallback({ zip, keyword, type });
+  }
+}
 
 // Santa Monica Health Navigator — Full updated prototype
 // Changes in this version:
@@ -22,183 +191,23 @@ export default function HealthNavigatorPrototype() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Local fallback provider dataset (used when backend is unreachable)
-  const staticProviders = [
-    {
-      id: "ucla_er",
-      name: "UCLA Santa Monica Medical Center",
-      type: "ER",
-      address: "1250 16th St, Santa Monica, CA",
-      lat: 34.0194,
-      lng: -118.4896,
-      phone: "+1-310-319-xxx",
-      acceptedInsurances: ["Medicare", "Aetna", "Blue Cross"]
-    },
-    {
-      id: "sm_primary_ocean",
-      name: "Santa Monica Primary Care - Ocean Ave",
-      type: "Primary Care",
-      address: "200 Ocean Ave, Santa Monica, CA",
-      lat: 34.0115,
-      lng: -118.4921,
-      phone: "+1-310-555-1212",
-      acceptedInsurances: ["Aetna", "Blue Cross", "UHC"]
-    },
-    {
-      id: "sm_urgent",
-      name: "Santa Monica Urgent Care",
-      type: "Urgent Care",
-      address: "1800 Wilshire Blvd, Santa Monica, CA",
-      lat: 34.0396,
-      lng: -118.4413,
-      phone: "+1-310-555-9876",
-      acceptedInsurances: ["Aetna", "UHC"]
-    },
-    {
-      id: "ortho_sm",
-      name: "Orthopedics of Santa Monica",
-      type: "Specialty",
-      specialty: "Orthopedics",
-      address: "930 Broadway, Santa Monica, CA",
-      lat: 34.0312,
-      lng: -118.4466,
-      phone: "+1-310-555-3333",
-      acceptedInsurances: ["Blue Cross", "UHC"]
-    }
-  ];
-
-  // Anatomical regions used by the SVG (ids are stable keys)
-  const regions = [
-    { id: "head", label: "Head / Face" },
-    { id: "neck", label: "Neck" },
-    { id: "chest", label: "Chest" },
-    { id: "abdomen", label: "Abdomen" },
-    { id: "pelvis", label: "Pelvis / Groin" },
-    { id: "leftShoulder", label: "Left Shoulder" },
-    { id: "rightShoulder", label: "Right Shoulder" },
-    { id: "leftArm", label: "Left Arm" },
-    { id: "rightArm", label: "Right Arm" },
-    { id: "leftHand", label: "Left Hand / Wrist" },
-    { id: "rightHand", label: "Right Hand / Wrist" },
-    { id: "leftLeg", label: "Left Leg" },
-    { id: "rightLeg", label: "Right Leg" },
-    { id: "leftFoot", label: "Left Foot / Ankle" },
-    { id: "rightFoot", label: "Right Foot / Ankle" },
-    { id: "back", label: "Back" }
-  ];
-
-  // Simpler symptom lists for UI clarity (can be expanded later)
-  const commonSymptoms = {
-    head: ["Headache", "Dizziness", "Facial swelling", "Vision changes", "Loss of consciousness"],
-    neck: ["Stiff neck", "Neck pain", "Swelling"],
-    chest: ["Chest pain", "Shortness of breath", "Palpitations", "Coughing blood"],
-    abdomen: ["Abdominal pain", "Nausea", "Vomiting", "Severe abdominal pain"],
-    pelvis: ["Pelvic pain", "Urinary pain", "Groin swelling"],
-    leftShoulder: ["Pain", "Limited range of motion", "Swelling"],
-    rightShoulder: ["Pain", "Limited range of motion", "Swelling"],
-    leftArm: ["Pain", "Numbness", "Weakness"],
-    rightArm: ["Pain", "Numbness", "Weakness"],
-    leftHand: ["Wrist pain", "Numb fingers", "Swelling"],
-    rightHand: ["Wrist pain", "Numb fingers", "Swelling"],
-    leftLeg: ["Pain", "Swelling", "Difficulty walking", "Redness"],
-    rightLeg: ["Pain", "Swelling", "Difficulty walking", "Redness"],
-    leftFoot: ["Ankle pain", "Difficulty bearing weight", "Swelling"],
-    rightFoot: ["Ankle pain", "Difficulty bearing weight", "Swelling"],
-    back: ["Lower back pain", "Upper back pain", "Radiating leg pain"]
-  };
-
   // Helper: reset selection
-  function onRegionClick(id) {
+  const onRegionClick = useCallback((id) => {
     setSelectedRegion(id);
     setSymptoms([]);
     setSeverity("mild");
     setDuration("hours");
     setResult(null);
-  }
+  }, []);
 
-  function toggleSymptom(s) {
+  const toggleSymptom = useCallback((s) => {
     setSymptoms(prev => (prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]));
-  }
+  }, []);
+
+  const selectedRegionLabel = useMemo(() => REGION_ID_TO_LABEL[selectedRegion], [selectedRegion]);
+  const symptomOptions = useMemo(() => (COMMON_SYMPTOMS[selectedRegion] || []), [selectedRegion]);
 
   // Core: call triage backend (secure keys server-side). Client sends user answers; backend uses Infermedica or similar and returns structured triage.
-  async function callTriageBackend(payload) {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/triage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        // fallback to local rule-based triage
-        return localTriageFallback(payload);
-      }
-
-      const data = await res.json();
-      return data; // expected shape { level: 'emergency'|'urgent'|'primary'|'specialty', rationale: '...' }
-    } catch (err) {
-      console.warn('Triage backend failed, using local fallback', err);
-      return localTriageFallback(payload);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Local fallback triage logic (simple, safe)
-  function localTriageFallback({ symptoms, severity, duration, age }) {
-    // red flags
-    const redFlagRegex = /(chest pain|shortness of breath|loss of consciousness|severe abdominal pain|uncontrolled bleeding|sudden severe headache)/i;
-    if (symptoms.some(s => redFlagRegex.test(s))) {
-      return { level: 'emergency', rationale: 'Red-flag symptom detected' };
-    }
-
-    // severity-based
-    if (severity === 'severe') return { level: 'emergency', rationale: 'High severity reported' };
-    if (severity === 'moderate' && duration === 'hours') return { level: 'urgent', rationale: 'Moderate and recent' };
-    if (severity === 'mild' && duration === 'hours') return { level: 'urgent', rationale: 'Mild but recent' };
-
-    // age-related fallback
-    if (age >= 65 && severity !== 'mild') return { level: 'urgent', rationale: 'Older adult with concerns' };
-
-    return { level: 'primary', rationale: 'Routine primary care recommended' };
-  }
-
-  // callPlaces backend to fetch nearby providers (backend should call Google Places / FHIR / vendor APIs)
-  async function callPlacesBackend({ zip, keyword, type }) {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({ zip, keyword: keyword || '', type: type || '' });
-      const res = await fetch('/api/places?' + params.toString());
-      if (!res.ok) {
-        // fallback to local static dataset filtered by type/keyword
-        return staticPlacesFallback({ zip, keyword, type });
-      }
-      const data = await res.json();
-      return data.providers || [];
-    } catch (err) {
-      console.warn('Places backend failed, using static fallback', err);
-      return staticPlacesFallback({ zip, keyword, type });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function staticPlacesFallback({ keyword, type }) {
-    const kw = (keyword || '').toLowerCase();
-    let filtered = staticProviders;
-    if (type) filtered = filtered.filter(p => p.type.toLowerCase() === type.toLowerCase());
-    if (kw) filtered = filtered.filter(p => p.name.toLowerCase().includes(kw) || (p.specialty || '').toLowerCase().includes(kw) || p.type.toLowerCase().includes(kw));
-    return filtered;
-  }
-
-  // Build Google Maps directions url for an address or coordinates
-  function mapsDirectionsUrl({ address, lat, lng }) {
-    if (lat && lng) return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(lat + ',' + lng)}`;
-    if (address) return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
-    return 'https://www.google.com/maps';
-  }
-
   async function evaluateRecommendation() {
     setResult(null);
     setLoading(true);
@@ -226,7 +235,7 @@ export default function HealthNavigatorPrototype() {
 
     // 4) If nothing found, broaden
     if (!final || final.length === 0) {
-      final = providers.length > 0 ? providers : staticProviders.filter(p => p.type === targetType);
+      final = providers.length > 0 ? providers : staticPlacesFallback({ zip, keyword: targetType });
     }
 
     setResult({ triage, level: targetType, providers: final });
@@ -236,47 +245,7 @@ export default function HealthNavigatorPrototype() {
   // --- SVG: more anatomical hotspots ---
   // This SVG uses simplified but anatomically positioned shapes. You can replace with a traced SVG
   function renderAnatomicalSVG() {
-    return (
-      <svg viewBox="0 0 300 700" className="w-full h-auto" role="img" aria-label="Anatomical body selector">
-        {/* Head */}
-        <ellipse cx="150" cy="70" rx="45" ry="55" fill={selectedRegion === 'head' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('head')} style={{cursor: 'pointer'}} />
-
-        {/* Neck */}
-        <rect x="135" y="125" width="30" height="20" rx="8" fill={selectedRegion === 'neck' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('neck')} style={{cursor: 'pointer'}} />
-
-        {/* Shoulders */}
-        <ellipse cx="95" cy="160" rx="35" ry="18" fill={selectedRegion === 'leftShoulder' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftShoulder')} style={{cursor: 'pointer'}} />
-        <ellipse cx="205" cy="160" rx="35" ry="18" fill={selectedRegion === 'rightShoulder' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightShoulder')} style={{cursor: 'pointer'}} />
-
-        {/* Chest */}
-        <path d="M110 145 q40 -10 80 0 v80 q-40 10 -80 0 z" fill={selectedRegion === 'chest' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('chest')} style={{cursor: 'pointer'}} />
-
-        {/* Abdomen */}
-        <rect x="120" y="235" width="60" height="70" rx="14" fill={selectedRegion === 'abdomen' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('abdomen')} style={{cursor: 'pointer'}} />
-
-        {/* Pelvis */}
-        <rect x="115" y="310" width="70" height="50" rx="10" fill={selectedRegion === 'pelvis' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('pelvis')} style={{cursor: 'pointer'}} />
-
-        {/* Arms */}
-        <rect x="50" y="175" width="40" height="150" rx="20" fill={selectedRegion === 'leftArm' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftArm')} style={{cursor: 'pointer'}} />
-        <rect x="210" y="175" width="40" height="150" rx="20" fill={selectedRegion === 'rightArm' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightArm')} style={{cursor: 'pointer'}} />
-
-        {/* Hands */}
-        <rect x="35" y="325" width="28" height="40" rx="8" fill={selectedRegion === 'leftHand' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftHand')} style={{cursor: 'pointer'}} />
-        <rect x="237" y="325" width="28" height="40" rx="8" fill={selectedRegion === 'rightHand' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightHand')} style={{cursor: 'pointer'}} />
-
-        {/* Back (covers mid-lower back) */}
-        <rect x="90" y="375" width="120" height="60" rx="12" fill={selectedRegion === 'back' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('back')} style={{cursor: 'pointer'}} />
-
-        {/* Legs */}
-        <rect x="120" y="450" width="36" height="160" rx="14" fill={selectedRegion === 'leftLeg' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftLeg')} style={{cursor: 'pointer'}} />
-        <rect x="164" y="450" width="36" height="160" rx="14" fill={selectedRegion === 'rightLeg' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightLeg')} style={{cursor: 'pointer'}} />
-
-        {/* Feet */}
-        <rect x="110" y="615" width="48" height="28" rx="8" fill={selectedRegion === 'leftFoot' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('leftFoot')} style={{cursor: 'pointer'}} />
-        <rect x="160" y="615" width="48" height="28" rx="8" fill={selectedRegion === 'rightFoot' ? '#60A5FA' : '#E5E7EB'} onClick={() => onRegionClick('rightFoot')} style={{cursor: 'pointer'}} />
-      </svg>
-    );
+    return <AnatomicalSVG selectedRegion={selectedRegion} onRegionClick={onRegionClick} />;
   }
 
   // UI
@@ -291,8 +260,13 @@ export default function HealthNavigatorPrototype() {
             <div className="bg-gray-100 rounded-lg p-4">{renderAnatomicalSVG()}</div>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
-              {regions.map(r => (
-                <button key={r.id} onClick={() => onRegionClick(r.id)} className={`text-left p-2 rounded-lg ${selectedRegion === r.id ? 'bg-blue-100' : 'bg-white'} border`}>
+              {REGIONS.map(r => (
+                <button
+                  key={r.id}
+                  onClick={() => onRegionClick(r.id)}
+                  aria-pressed={selectedRegion === r.id}
+                  className={`text-left p-2 rounded-lg ${selectedRegion === r.id ? 'bg-blue-100' : 'bg-white'} border`}
+                >
                   {r.label}
                 </button>
               ))}
@@ -307,12 +281,12 @@ export default function HealthNavigatorPrototype() {
 
               {selectedRegion && (
                 <div>
-                  <h2 className="font-medium">Selected: {regions.find(r => r.id === selectedRegion)?.label}</h2>
+                  <h2 className="font-medium">Selected: {selectedRegionLabel}</h2>
 
                   <div className="mt-3">
                     <div className="text-sm font-semibold">Common symptoms</div>
                     <div className="mt-2 grid grid-cols-1 gap-2">
-                      {(commonSymptoms[selectedRegion] || []).map(s => (
+                      {symptomOptions.map(s => (
                         <label key={s} className={`flex items-center space-x-2 p-2 border rounded ${symptoms.includes(s) ? 'bg-blue-50' : 'bg-white'}`}>
                           <input type="checkbox" checked={symptoms.includes(s)} onChange={() => toggleSymptom(s)} />
                           <span className="text-sm">{s}</span>
@@ -408,7 +382,7 @@ export default function HealthNavigatorPrototype() {
 
                         <div className="flex flex-col space-y-2 ml-4">
                           <a href={`tel:${p.phone}`} className="px-3 py-1 border rounded text-xs text-blue-600">Call</a>
-                          <a href={mapsDirectionsUrl(p)} target="_blank" rel="noreferrer" className="px-3 py-1 border rounded text-xs text-green-600">Directions</a>
+                          <a href={mapsDirectionsUrl(p)} target="_blank" rel="noopener noreferrer" className="px-3 py-1 border rounded text-xs text-green-600">Directions</a>
                           <button onClick={() => window.open(mapsDirectionsUrl(p), '_blank')} className="px-3 py-1 border rounded text-xs">Open Map</button>
                         </div>
                       </li>
