@@ -1,0 +1,6 @@
+nohup: ignoring input
+
+> santa-monica-health-navigator@0.1.0 start
+> node server/index.js
+
+Server listening on 3001
