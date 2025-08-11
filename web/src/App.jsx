@@ -7,9 +7,3 @@ export default function App() {
     </div>
   )
 }
-
-<script src="improvements/smart-category-system.js"></script>
-
-<script src="improvements/simplified-insurance-form.js"></script>
-
-<script src="improvements/provider-websites.js"></script>
